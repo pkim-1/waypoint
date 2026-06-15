@@ -651,6 +651,76 @@ body.sidebar-collapsed .sidebar { transform: translateX(-100%); opacity: 0; poin
 .settings-status.connected { background: rgba(52,199,89,0.1); color: #34c759; }
 .settings-status.disconnected { background: rgba(255,59,48,0.1); color: #ff3b30; }
 
+/* ── Label Management Modal ── */
+.label-modal {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 420px;
+  max-width: 95vw;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.2);
+}
+.label-modal h2 { font-size: 16px; margin-bottom: 16px; }
+.label-list { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; margin-bottom: 12px; }
+.label-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.label-row input[type="color"] {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  background: none;
+}
+.label-row input[type="text"] {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.label-row input[type="text"]:focus { border-color: var(--accent); }
+.label-row button {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+}
+.label-row button:hover { color: #ff3b30; }
+.add-label-row { display: flex; gap: 8px; align-items: center; }
+.add-label-row input[type="color"] {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  background: none;
+}
+.add-label-row input[type="text"] {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.add-label-row input[type="text"]:focus { border-color: var(--accent); }
+
 /* ── Team Management Modal ── */
 .team-modal {
   background: var(--surface);
@@ -716,6 +786,7 @@ body.sidebar-collapsed .sidebar { transform: translateX(-100%); opacity: 0; poin
   max-width: 320px;
 }
 .toast.error { border-color: #ff3b30; color: #ff3b30; }
+.toast.warning { border-color: #ff9500; color: #ff9500; }
 .toast.success { border-color: #34c759; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes toast-out { from { opacity: 1; } to { opacity: 0; } }
@@ -789,7 +860,7 @@ body.sidebar-collapsed .sidebar { transform: translateX(-100%); opacity: 0; poin
     <label><input type="checkbox" value="inprogress" checked> In Progress</label>
     <label><input type="checkbox" value="done" checked> Done</label>
   </div>
-  <h3>Labels</h3>
+  <h3>Labels <a id="manageLabelsLink">Manage</a></h3>
   <div class="filter-group" id="labelFilters"></div>
   <h3>Due Date</h3>
   <div class="filter-group" id="dueDateFilters">
@@ -971,12 +1042,28 @@ body.sidebar-collapsed .sidebar { transform: translateX(-100%); opacity: 0; poin
   </div>
 </div>
 
+<!-- Label Management Modal -->
+<div class="modal-overlay" id="labelOverlay">
+  <div class="label-modal" id="label-management">
+    <h2>Manage Labels</h2>
+    <div class="label-list" id="labelList"></div>
+    <div class="add-label-row">
+      <input type="color" id="newLabelColor" value="#007aff">
+      <input type="text" id="newLabelName" placeholder="New label name...">
+      <button class="btn btn-primary" id="addLabelBtn">Add</button>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn" id="labelClose">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast Container -->
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
 // ── Constants ──
-const LABELS = {
+const DEFAULT_LABELS = {
   bug:      { name: 'Bug',      color: '#ff3b30' },
   feature:  { name: 'Feature',  color: '#007aff' },
   urgent:   { name: 'Urgent',   color: '#ff9500' },
@@ -986,6 +1073,112 @@ const LABELS = {
   action:   { name: 'Action',   color: '#ff6b35' },
   decision: { name: 'Decision', color: '#00a878' },
 };
+const LABELS_KEY = 'waypoint_labels';
+let LABELS = loadLabels();
+
+function loadLabels() {
+  const stored = localStorage.getItem(LABELS_KEY);
+  if (stored) {
+    try { return JSON.parse(stored); } catch {}
+  }
+  return { ...DEFAULT_LABELS };
+}
+
+function saveLabels() {
+  localStorage.setItem(LABELS_KEY, JSON.stringify(LABELS));
+}
+
+function slugifyLabel(name) {
+  return name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+}
+
+function openLabelModal() {
+  document.getElementById('labelOverlay').classList.add('open');
+  renderLabelList();
+}
+
+function closeLabelModal() {
+  document.getElementById('labelOverlay').classList.remove('open');
+}
+
+function renderLabelList() {
+  const el = document.getElementById('labelList');
+  const entries = Object.entries(LABELS);
+  if (entries.length === 0) {
+    el.innerHTML = '<div style="padding:12px;color:var(--text-secondary);font-size:13px">No labels configured.</div>';
+    return;
+  }
+  el.innerHTML = entries.map(([key, v]) => `
+    <div class="label-row" data-key="${key}">
+      <input type="color" value="${v.color}" data-key="${key}" class="label-color-input">
+      <input type="text" value="${esc(v.name)}" data-key="${key}" class="label-name-input">
+      <button data-key="${key}" class="label-delete-btn" title="Remove">&times;</button>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.label-color-input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      LABELS[inp.dataset.key].color = inp.value;
+      saveLabels();
+      renderLabelFilters();
+      render();
+    });
+  });
+  el.querySelectorAll('.label-name-input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const oldKey = inp.dataset.key;
+      const newName = inp.value.trim();
+      if (!newName) return;
+      const newKey = slugifyLabel(newName);
+      if (newKey !== oldKey) {
+        LABELS[newKey] = { name: newName, color: LABELS[oldKey].color };
+        delete LABELS[oldKey];
+        tasks.forEach(t => {
+          const idx = t.labels.indexOf(oldKey);
+          if (idx >= 0) t.labels[idx] = newKey;
+        });
+        saveAllTasks();
+      } else {
+        LABELS[oldKey].name = newName;
+      }
+      saveLabels();
+      renderLabelFilters();
+      renderLabelList();
+      render();
+    });
+  });
+  el.querySelectorAll('.label-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      if (!confirm('Delete label "' + LABELS[key].name + '"?')) return;
+      delete LABELS[key];
+      tasks.forEach(t => { t.labels = t.labels.filter(l => l !== key); });
+      saveAllTasks();
+      saveLabels();
+      renderLabelFilters();
+      renderLabelList();
+      render();
+    });
+  });
+}
+
+function addLabel() {
+  const nameInput = document.getElementById('newLabelName');
+  const colorInput = document.getElementById('newLabelColor');
+  const name = nameInput.value.trim();
+  if (!name) return;
+  const key = slugifyLabel(name);
+  if (LABELS[key]) { showToast('Label "' + name + '" already exists', 'error'); return; }
+  LABELS[key] = { name, color: colorInput.value };
+  saveLabels();
+  nameInput.value = '';
+  renderLabelFilters();
+  renderLabelList();
+  render();
+  showToast('Added label: ' + name);
+}
+
+const TRANSCRIPT_HASHES_KEY = 'waypoint_transcript_hashes';
 const STORAGE_KEY = 'waypoint_tasks';
 const THEME_KEY = 'waypoint_theme';
 const MEMBERS_KEY = 'waypoint_members';
@@ -1096,6 +1289,7 @@ function normalizeTask(t) {
     meetingId: t.meetingId || t.meeting_id || null,
     meetingTitle: t.meetingTitle || t.meeting_title || null,
     itemType: t.itemType || t.item_type || null,
+    notes: t.notes || [],
     createdAt: t.createdAt || t.created_at || new Date().toISOString(),
     completedAt: t.completedAt || t.completed_at || null,
     sortOrder: t.sortOrder || t.sort_order || 0
@@ -1116,6 +1310,7 @@ function taskToDbRow(t) {
     meeting_id: t.meetingId || null,
     meeting_title: t.meetingTitle || null,
     item_type: t.itemType || null,
+    notes: t.notes || [],
     created_at: t.createdAt,
     completed_at: t.completedAt || null,
     sort_order: t.sortOrder || 0
@@ -1345,6 +1540,42 @@ function getAvatarColor(name) {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
+// ── Transcript Deduplication ──
+async function computeTranscriptHash(text) {
+  const fingerprint = text.slice(0, 500) + '|' + text.length;
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(fingerprint));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function getTranscriptHashes() {
+  const stored = localStorage.getItem(TRANSCRIPT_HASHES_KEY);
+  return stored ? JSON.parse(stored) : [];
+}
+
+function saveTranscriptHash(hash, title, date) {
+  const hashes = getTranscriptHashes();
+  hashes.push({ hash, title, date, processedAt: new Date().toISOString() });
+  localStorage.setItem(TRANSCRIPT_HASHES_KEY, JSON.stringify(hashes));
+}
+
+function findDuplicateTranscript(hash) {
+  const hashes = getTranscriptHashes();
+  return hashes.find(h => h.hash === hash);
+}
+
+// ── Notes Helpers ──
+function relativeTime(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + ' min ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + ' hr ago';
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return days + ' day' + (days > 1 ? 's' : '') + ' ago';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 // ── Rendering: Board ──
 function renderBoard() {
   const filtered = filterTasks();
@@ -1505,6 +1736,24 @@ function openPanel(id) {
         <input type="text" id="newCheckItem" placeholder="Add item...">
         <button class="btn" id="addCheckBtn">Add</button>
       </div>
+    </div>
+    <div class="field-group">
+      <label>Notes</label>
+      <div id="panelNotes" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto">
+        ${(task.notes || []).slice().reverse().map(n => `
+          <div style="border-left:3px solid ${n.source === 'transcript' ? 'var(--accent)' : 'var(--border)'};padding:6px 10px;font-size:12px;background:var(--bg);border-radius:0 var(--radius-sm) var(--radius-sm) 0">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:2px">
+              <span style="color:var(--text-secondary);font-size:11px">${relativeTime(n.createdAt)}</span>
+              ${n.source === 'transcript' ? '<span style="font-size:10px;background:var(--accent-light);color:var(--accent);padding:1px 6px;border-radius:8px">transcript</span>' : ''}
+            </div>
+            <div style="color:var(--text);line-height:1.4">${esc(n.text)}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="add-checklist" style="margin-top:6px">
+        <input type="text" id="newNoteText" placeholder="Add note...">
+        <button class="btn" id="addNoteBtn">Add</button>
+      </div>
     </div>`;
 
   // Event listeners
@@ -1553,6 +1802,17 @@ function openPanel(id) {
   };
   body.querySelector('#addCheckBtn').addEventListener('click', addCheck);
   body.querySelector('#newCheckItem').addEventListener('keydown', e => { if (e.key === 'Enter') addCheck(); });
+
+  const addNote = () => {
+    const inp = body.querySelector('#newNoteText');
+    if (inp.value.trim()) {
+      if (!task.notes) task.notes = [];
+      task.notes.push({ text: inp.value.trim(), createdAt: new Date().toISOString(), source: 'manual' });
+      saveTask(task); openPanel(id);
+    }
+  };
+  body.querySelector('#addNoteBtn').addEventListener('click', addNote);
+  body.querySelector('#newNoteText').addEventListener('keydown', e => { if (e.key === 'Enter') addNote(); });
 
   document.getElementById('taskPanel').classList.add('open');
   document.getElementById('panelOverlay').classList.add('open');
@@ -1926,9 +2186,16 @@ function handleFileUpload(file) {
   reader.readAsText(file);
 }
 
+let _currentTranscriptHash = null;
+let _transcriptDuplicate = null;
+
 async function runParse(mode) {
   const text = document.getElementById('transcriptText').value.trim();
   if (!text) { showToast('Paste or upload a transcript first', 'error'); return; }
+
+  // Check for duplicate transcript
+  _currentTranscriptHash = await computeTranscriptHash(text);
+  _transcriptDuplicate = findDuplicateTranscript(_currentTranscriptHash);
 
   const statusEl = document.getElementById('parseStatus');
   const parseBtn = document.getElementById('parseBtn');
@@ -1989,7 +2256,12 @@ function renderTranscriptReview() {
 
   const actions = _parsedItems.filter(i => i.type === 'action').length;
   const decisions = _parsedItems.filter(i => i.type === 'decision').length;
-  document.getElementById('reviewStats').textContent = `${_parsedItems.length} items: ${actions} actions, ${decisions} decisions`;
+  let statsHtml = `${_parsedItems.length} items: ${actions} actions, ${decisions} decisions`;
+  if (_transcriptDuplicate) {
+    statsHtml += ` <span style="color:#ff9500;font-weight:600"> | Transcript was previously processed</span>`;
+    showToast('This transcript appears to have been processed before (' + (_transcriptDuplicate.title || 'Untitled') + ', ' + (_transcriptDuplicate.date || '') + '). Items may be duplicates.', 'error');
+  }
+  document.getElementById('reviewStats').innerHTML = statsHtml;
 
   const table = document.getElementById('reviewTable');
   table.innerHTML = _parsedItems.map((item, idx) => `
@@ -2031,6 +2303,10 @@ async function acceptParsedItems() {
 
   for (const item of included) {
     const member = teamMembers.find(m => m.name.toLowerCase() === (item.assignee || '').toLowerCase());
+    const notes = [];
+    if (item.context) {
+      notes.push({ text: item.context, createdAt: new Date().toISOString(), source: 'transcript' });
+    }
     const task = normalizeTask({
       id: crypto.randomUUID(),
       title: item.text,
@@ -2044,11 +2320,19 @@ async function acceptParsedItems() {
       meetingId: meeting.id,
       meetingTitle: meeting.title,
       itemType: item.type,
+      notes,
       createdAt: new Date().toISOString(),
       completedAt: null
     });
     tasks.unshift(task);
     await saveTask(task);
+  }
+
+  // Save transcript hash after successful creation
+  if (_currentTranscriptHash) {
+    saveTranscriptHash(_currentTranscriptHash, title, date);
+    _currentTranscriptHash = null;
+    _transcriptDuplicate = null;
   }
 
   showToast('Created ' + included.length + ' tasks from transcript', 'success');
@@ -2195,6 +2479,13 @@ function renderTeamList() {
   document.getElementById('settingsCancel').addEventListener('click', closeSettings);
   document.getElementById('settingsOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeSettings(); });
   document.getElementById('settingsSave').addEventListener('click', saveSettings);
+
+  // Label management
+  document.getElementById('manageLabelsLink').addEventListener('click', openLabelModal);
+  document.getElementById('labelClose').addEventListener('click', closeLabelModal);
+  document.getElementById('labelOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeLabelModal(); });
+  document.getElementById('addLabelBtn').addEventListener('click', addLabel);
+  document.getElementById('newLabelName').addEventListener('keydown', e => { if (e.key === 'Enter') addLabel(); });
 
   // Team management
   document.getElementById('manageTeamLink').addEventListener('click', openTeamModal);
